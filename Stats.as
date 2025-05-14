@@ -304,7 +304,7 @@ void delay_print(EHandle h_plr, array<string>@ messages, int chunkSize) {
 			end = messages.size();
 		}
 		
-		g_Scheduler.SetTimeout("delay_print", delay, h_plr, @messages, start, end);
+		Functions::AddSchedule(g_Scheduler.SetTimeout("delay_print", delay, h_plr, @messages, start, end));
 		delay += 0.1f;
 	}
 }

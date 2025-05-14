@@ -1,19 +1,19 @@
 #include "Stats"
 #include "MicSounds"
-#include "brap"
+#include "ScheduleManager"
 
 // . doesnt work in spectator for loaded sounds
 
 // config
-const string g_SoundFile      = "scripts/plugins/cfg/ChatSounds.txt"; // permanently precached sounds
-const string g_extraSoundFile = "scripts/plugins/cfg/ChatSounds_extra.txt"; // sounds that players can choose to precache
+const string g_SoundFile      = "scripts/plugins/ChatSounds/ChatSounds.txt"; // permanently precached sounds
+const string g_extraSoundFile = "scripts/plugins/ChatSounds/ChatSounds_extra.txt"; // sounds that players can choose to precache
 const string soundStatsFile   = "scripts/plugins/store/cs_stats.txt"; // .csstats
 const string soundListsFile   = "scripts/plugins/store/cs_lists.txt"; // personal sound lists
 const string g_spk_folder     = "scripts/plugins/temp"; // path to sound files converted to NetworkMessage format
 const string micsound_file    = "scripts/plugins/store/_tocs.txt";
 const string g_soundlist_link = "";
 const uint g_BaseDelay        = 6666;
-const array<string> g_sprites = {'sprites/flower.spr', 'sprites/nyanpasu2.spr', 'sprites/flowergag.spr'};
+const array<string> g_sprites = {'sprites/voiceicon.spr', 'sprites/voiceicon.spr', 'sprites/voiceicon.spr'};
 const uint MAX_PERSONAL_SOUNDS = 8;
 const float CSMIC_SOUND_TIMEOUT = 1.0f; // wait this many seconds before giving up on waiting for a sound to convert
 const float CSMIC_VOLUME = 22; // global volume setting for sounds played over mic, 15 = 100% volume of normal sounds
@@ -112,7 +112,6 @@ class PlayerState {
 	int micMode = MICMODE_LOCAL;
 	int volume = 100;
 	int pitch = 100;
-	Vector brapColor = Vector(200, 255, 200);
 	bool reliablePackets = false; // helps with lossy connections
 	float lastLaggyCmd = 0; // for cooldowns on commands that could lag the serber to death if spammed
 	float joinTime; // for delaying reliable packets
@@ -174,15 +173,12 @@ void PluginInit() {
 		loadUsageStats();
 	loadPersonalSoundLists();
 	update_mic_sounds_config_all();
-	
-	g_Scheduler.SetInterval("brap_think", 0.05f, -1);
 }
 
 void PluginExit() {
 	if (g_stats_enabled)
 		writeUsageStats();
 	writePersonalSoundLists();
-	brap_unload();
 }
 
 void stop_crying()
@@ -202,19 +198,6 @@ void stop_crying()
 			g_SoundSystem.StopSound(target.edict(), tstate.lastSoundChan, tstate.lastSound);
 			// g_PlayerFuncs.SayTextAll(null, "Stopped player from crying!\n");
 		}
-	}
-}
-
-void kiss_effect(EHandle h_plr, int kissLeft) {
-	CBasePlayer@ plr = cast<CBasePlayer@>(h_plr.GetEntity());
-	if (plr is null or !plr.IsConnected()) {
-		return;
-	}
-	
-	te_playersprites(plr, "sprites/heart.spr", 2);
-
-	if (kissLeft > 0) {
-		g_Scheduler.SetTimeout("kiss_effect", 0.2f, h_plr, kissLeft-1);
 	}
 }
 
@@ -252,12 +235,9 @@ void MapInit() {
     for (uint i = 0; i < g_sprites.length(); ++i) {
         g_Game.PrecacheModel(g_sprites[i]);
     }
-	
-	g_Game.PrecacheModel("sprites/heart.spr");
 
     precached = true;
-	
-	brap_precache();
+	Functions::ScheduleManagerInit();
 }
 
 void updatePrecachedSounds() {
@@ -375,7 +355,7 @@ void writePersonalSoundLists() {
     println("Wrote chatsound lists in " + diff + " seconds");
 }
 
-HookReturnCode MapChange() {
+HookReturnCode MapChange(const string& in sLevel) {
 	if (g_stats_enabled)
 		writeUsageStats();
 	writePersonalSoundLists();
@@ -392,7 +372,7 @@ HookReturnCode MapChange() {
 		const string steamId = g_EngineFuncs.GetPlayerAuthId(plr.edict());
 		g_last_map_players.insertLast(steamId);
 	}
-	
+	Functions::RemoveAllSchedule();
     return HOOK_CONTINUE;
 }
 
@@ -989,7 +969,7 @@ HookReturnCode ClientSay(SayParameters@ pParams) {
                     player_say(pPlayer, pParams.GetCommand());
 
 				te_killplayerattachments(pPlayer);
-				g_Scheduler.SetTimeout("delayGagIcon", 0.1f, EHandle(pPlayer));
+				Functions::AddSchedule(g_Scheduler.SetTimeout("delayGagIcon", 0.1f, EHandle(pPlayer)));
 				
                 pParams.ShouldHide = true;
             }
@@ -1010,41 +990,11 @@ HookReturnCode ClientSay(SayParameters@ pParams) {
                     const float attenuation = 0.4f; // less = bigger sound range
                     play_chat_sound(pPlayer, CHAN_VOICE, chatsound, volume, attenuation, pitch);
 					
-					if (soundArg == 'kiss') {
-						kiss_effect(EHandle(pPlayer), 6);
-					}
-					if (soundArg == 'kiss2') {
-						kiss_effect(EHandle(pPlayer), 1);
-					}
-					
 					if (soundArg == "stopcrying" || soundArg == "stopcrying2" || soundArg == "stopwhine" || soundArg == "dontcry" || soundArg == "dontcry2") {
 						// stop_crying();
-						g_Scheduler.SetTimeout("stop_crying", 2.f); //delay it so they can hear the player say "stop crying" before doing so
+						Functions::AddSchedule(g_Scheduler.SetTimeout("stop_crying", 2.f)); //delay it so they can hear the player say "stop crying" before doing so
 					}
-					/*
-					if (soundArg == 'bonk' and pitchArg.Length() > 0) {
-						string targetid = pitchArg;
-						targetid = targetid.ToLowercase();
-						CBasePlayer@ target = getBonkTarget(pPlayer, targetid);
-						
-						if (target !is null and target.IsConnected()) {
-							PlayerState@ tstate = getPlayerState(target);
-							g_PlayerFuncs.ClientPrintAll(HUD_PRINTNOTIFY, "[ChatSounds] " + pPlayer.pev.netname + " bonked " + target.pev.netname + ".\n");
-							stop_mic_sound(target);
-							g_SoundSystem.StopSound(target.edict(), tstate.lastSoundChan, tstate.lastSound);
-						}
-					}
-					*/
                 }
-				
-				if (soundArg == 'toot' || soundArg == 'tooot' || soundArg == 'brap' || soundArg == 'tootrape' || soundArg == 'braprape' || soundArg == "bloodbrap" || soundArg == "bloodbraprape" || soundArg == "braplong") {
-					do_brap(pPlayer, soundArg, pitch);
-				}
-				if (soundArg == 'sniff' || soundArg == 'snifff' || soundArg == 'sniffrape') {
-					do_sniff(pPlayer, soundArg, pitch);
-				}
-
-                
 
                 if (allowrelay)
                     return HOOK_CONTINUE;
@@ -1124,10 +1074,6 @@ HookReturnCode ClientSay(SayParameters@ pParams) {
 			listpersonal(pPlayer, pArguments);
             pParams.ShouldHide = true;
         }
-		else if (pArguments.ArgC() > 0 && soundArg == '.brapcolor') {
-			brapcolor(pPlayer, pArguments);
-            pParams.ShouldHide = true;
-        }
     }
 
     return HOOK_CONTINUE;
@@ -1154,7 +1100,7 @@ HookReturnCode ClientPutInServer(CBasePlayer@ pPlayer) {
 	if (state.reliablePackets) {
 		state.reliablePackets = false;
 		string steamId = g_EngineFuncs.GetPlayerAuthId( pPlayer.edict() );
-		g_Scheduler.SetTimeout("delay_reliable_enable", CSRELIABLE_DELAY, EHandle(pPlayer), steamId);
+		Functions::AddSchedule(g_Scheduler.SetTimeout("delay_reliable_enable", CSRELIABLE_DELAY, EHandle(pPlayer), steamId));
 	}
 	
 	update_mic_sounds_config(pPlayer);
@@ -1248,7 +1194,7 @@ void csunloadMenuCallback(CTextMenu@ menu, CBasePlayer@ plr, int page, const CTe
 	
 	removePersonalSound(plr, replaceStr);
 	g_PlayerFuncs.SayText(plr, "[ChatSounds] Unloaded " + replaceStr + "\n");
-	g_Scheduler.SetTimeout("open_unload_menu", 0.0f, EHandle(plr));
+	Functions::AddSchedule(g_Scheduler.SetTimeout("open_unload_menu", 0.0f, EHandle(plr)));
 }
 
 void showPersonalSounds(CBasePlayer@ plr) {
@@ -1340,10 +1286,7 @@ void cspreview(CBasePlayer@ plr, const CCommand@ args) {
 
 void csload(CBasePlayer@ plr, const CCommand@ args) {
 	if (args.ArgC() == 1) {
-		g_PlayerFuncs.SayText(plr, 'Say ".csload brap" to add the brap sound to your personal sound list.\n');
-		g_PlayerFuncs.SayText(plr, 'Say ".csload brap ting uhoh" to replace your sound list with the given sounds.\n');
 		g_PlayerFuncs.SayText(plr, 'Say ".listsounds2" to see loadable sounds.\n');
-		g_PlayerFuncs.SayText(plr, 'Say ".cs brap" to preview a sound (no cooldown + only you can hear).\n');
 		g_PlayerFuncs.SayText(plr, 'Say ".csmic" to hear unloaded sounds via microphone.\n');
 		
 		g_PlayerFuncs.SayText(plr, 'Your personal sounds will load when a new map loads. Restarts don\'t count as a new map.\n');
